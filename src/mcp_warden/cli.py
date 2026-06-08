@@ -26,6 +26,7 @@ from rich.table import Table
 
 from .capture import CaptureError, capture_surface_sync
 from .checks import run_checks
+from .cli_diff import register as register_diff_command
 from .cli_guard import register as register_guard_commands
 from .cli_lock import register as register_lock_commands
 from .drift import compute_drift
@@ -57,6 +58,7 @@ err_console = Console(stderr=True)
 # own modules to keep this file under the LOC budget; register them here.
 register_guard_commands(app, console, err_console)
 register_lock_commands(app, console, err_console)
+register_diff_command(app, console, err_console)
 
 
 def _split_server_cmd(server_cmd: list[str]) -> tuple[str, list[str]]:

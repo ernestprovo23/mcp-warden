@@ -237,3 +237,13 @@ Robustness:
    findings. Static findings populate SARIF + gate `--approve`.
 6. SARIF `ruleId` == the check ID verbatim; `level` per §2.
 7. Local paths in launch args are never flagged as supply-chain refs.
+
+> **`warden diff` (v0.3) is an offline VIEWER, not a gate.** `check` is the gate
+> (re-captures a live server, fails on drift). `diff <lock-a> <lock-b>` instead
+> compares two EXISTING locks offline by reusing the same drift engine
+> (`compute_drift`) — it adds no diff logic. It is **redaction-safe**: it renders
+> only `DriftItem`s (server-identity drift is the hardcoded "launch changed"
+> message; schema `detail` is pre-redacted) plus an explicit allowlist of safe
+> provenance fields, and NEVER prints raw `server.command`/`args`. Default exit 0;
+> `--exit-code` returns 1 on **integrity** drift only (provenance differences are
+> informational and never trip it).
