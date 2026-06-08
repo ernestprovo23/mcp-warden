@@ -32,6 +32,12 @@ class DriftItem:
         message: Human-readable description.
         detail: Optional compact, non-secret structural detail (schema diffs),
             e.g. ``"maxLength 64→4096"``. ``None`` for non-schema drift.
+
+    Invariant (redaction contract, #20): ``detail`` must never contain raw
+    ``server.command`` / ``server.args`` — these can carry secrets. Schema
+    ``detail`` is pre-redacted via ``schema_diff``; server-identity drift carries
+    a hardcoded message and ``detail=None``. Downstream renderers (``warden
+    diff``) rely on this to stay leak-free.
     """
 
     drift_class: str

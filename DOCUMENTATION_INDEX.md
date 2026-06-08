@@ -10,7 +10,7 @@ describe and visualize the implementation that satisfies that contract.
 
 | # | Doc | Purpose |
 |---|-----|---------|
-| 1 | [`README.md`](README.md) | Project overview, install, the pin/check CI demo, CLI reference |
+| 1 | [`README.md`](README.md) | Project overview, install, the pin/check CI demo, CLI reference (incl. v0.3 `lock rotate` + redacted offline `diff` viewer) |
 | 2 | [`SYSTEM_CONTEXT_DIAGRAM.md`](SYSTEM_CONTEXT_DIAGRAM.md) | System context + pin/check sequence (mermaid); trust boundary; `conclave` as dev-time reviewer only |
 | 3 | [`DOCUMENTATION_INDEX.md`](DOCUMENTATION_INDEX.md) | This file |
 
@@ -75,7 +75,7 @@ describe and visualize the implementation that satisfies that contract.
 | `src/mcp_warden/wire_block.py` | **(v0.2/v0.3)** on-wire block synthesis: `-32001` error-response + redacted-content (`_meta.warden.modified`); **v0.3** `-32002` `transport_error` | GUARD_PROXY §7 · V3 §2.6 |
 | `src/mcp_warden/inspector.py` | **(v0.2)** offline JSONL analyzer over recorded sessions (same catalog) | GUARD_PROXY §3 |
 | `src/mcp_warden/emit_res.py` | **(v0.2)** SARIF 2.1.0 + JSONL emitters for `ResultFinding` (action/direction/tier) | GUARD_PROXY §10 |
-| `src/mcp_warden/cli.py` · `cli_guard.py` · `cli_lock.py` | `typer` CLI (`pin`/`check`/`policy`/`guard`/`inspect`/`lock rotate`), exit codes; `guard`/`inspect` bodies in `cli_guard`, `lock rotate` + integrity gate in `cli_lock` | all |
+| `src/mcp_warden/cli.py` · `cli_guard.py` · `cli_lock.py` · `cli_diff.py` | `typer` CLI (`pin`/`check`/`policy`/`guard`/`inspect`/`lock rotate`/`diff`), exit codes; `guard`/`inspect` bodies in `cli_guard`, `lock rotate` + integrity gate in `cli_lock`, **(v0.3) `diff` redacted offline lock viewer (`SAFE_PROVENANCE_FIELDS` allowlist, never reads `server.command`/`args`)** in `cli_diff` | all |
 
 ## Tests
 
@@ -90,6 +90,7 @@ describe and visualize the implementation that satisfies that contract.
 | `tests/test_policy.py` | Lint (incl. unknown-key error) + eval (allow/deny/SSRF/fail-closed) |
 | `tests/test_emitters.py` | SARIF shape + level mapping + JSONL records |
 | `tests/test_e2e_pin_check.py` | **Headline:** real stdio pin→mutate→check round-trip |
+| `tests/test_diff.py` | **(v0.3)** `warden diff` renderer: identical→"no differences", tool add/remove + schema change rows, **redaction-leak guard** (secret in `server.args` absent from human/`--json`/`--sarif` incl. parsed-JSONL `detail`), provenance-only section vs empty integrity drift, `--exit-code` (1 on integrity drift / 0 on provenance-only), `--no-provenance` M6 message, fail-closed on missing/invalid lock |
 | `tests/test_result_inspection.py` | **(v0.2)** `WRD-RES-*`: ANSI codepoint match (incl. extended/binary-ok), secret-echo reuse + redaction, exfil host/subdomain boundary + path-qualified, injection exact-phrase (no broad-regex FP), URL/uninspectable notes |
 | `tests/test_inspection_policy.py` | **(v0.2)** §11 per-tool policy fail-safe defaults, byte-identical-to-v0.1 digest when absent, inspection-policy drift, pin-time validation, reader fallback + LOCK-INVALID |
 | `tests/test_wire_block.py` | **(v0.2)** `-32001` error-response shape, block-mode mapping, ANSI strip-in-place `_meta.warden.modified`, secret redact-in-place |

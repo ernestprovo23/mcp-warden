@@ -12,6 +12,10 @@ teardown, reserved transport code `-32002`); see `docs/GUARD_PROXY_V3.md`. **v0.
 `lock rotate` — a lifecycle verb that re-attests an existing baseline's structured provenance
 (`pinner`/`attestations`) **without re-capturing the surface**, leaving `overall_digest`
 byte-identical and failing closed on a tampered lock (`docs/WARDEN_LOCK_SCHEMA.md` §8.1–§8.2).
+**v0.3** further adds `diff <lock-a> <lock-b>` — an **offline, redacted viewer** that renders
+integrity drift between two EXISTING locks by reusing `compute_drift` (no capture, no new diff
+logic) plus a separate informational provenance section. It never prints raw
+`server.command`/`args` (secret-safe); default exit 0, `--exit-code` → 1 on integrity drift only.
 
 > `conclave` (the 4-model adversarial council referenced in `docs/THREAT_MODEL.md`)
 > is a **dev-time design reviewer** that shaped this contract. It is **NOT** a
@@ -30,7 +34,7 @@ flowchart TB
     end
 
     subgraph ci["CI pipeline (GitHub Actions / local)"]
-        warden["mcp-warden CLI\npin · check · policy · lock rotate"]
+        warden["mcp-warden CLI\npin · check · policy · lock rotate · diff"]
     end
 
     subgraph target["Untrusted boundary"]
