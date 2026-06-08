@@ -102,7 +102,10 @@ def test_server_unavailable_non_strict_exits_0(monkeypatch, capsys):
     assert rc == 0
     err = capsys.readouterr().err
     assert "WARNING" in err
-    assert "this-command-does-not-exist-xyz" in err  # server cmd in the message
+    # B3: argv[0] (the executable name) IS shown for debuggability, but the
+    # remaining args are redacted. Here there are no extra args, so the bare
+    # command name appears.
+    assert "this-command-does-not-exist-xyz" in err
     assert "8" in err  # timeout value in the message
 
 
@@ -162,11 +165,25 @@ def test_cwd_normalized_matches_direct_check_drift(monkeypatch):
 
 
 def _install_write_spy(monkeypatch, lock_abspath: Path, writes: list[str]) -> None:
-    """Record any WRITE-mode access to ``lock_abspath`` via the three paths a
-    Python lock-writer could plausibly use: ``builtins.open``, ``Path.open``,
-    and ``Path.write_text``/``write_bytes``. Scoped to the lock path so unrelated
+    """Record any WRITE-mode access to ``lock_abspath`` via the paths a Python
+    lock-writer could plausibly use: ``builtins.open``, ``Path.open``,
+    ``Path.write_text``/``write_bytes``, AND the project's own ``write_lock``
+    helper (transitive gap — a future refactor could reach the writer without
+    touching the file primitives directly). Scoped to the lock path so unrelated
     logging/temp writes do not trip false positives.
     """
+    # Spy on write_lock too: assert the wrapper never invokes the lock WRITER at
+    # all (it should only ever read_lock + build an in-memory current lock).
+    from mcp_warden import lockfile as _lockfile
+
+    _real_write_lock = _lockfile.write_lock
+
+    def _spy_write_lock(*args, **kwargs):
+        writes.append("write_lock() invoked")
+        return _real_write_lock(*args, **kwargs)
+
+    monkeypatch.setattr(_lockfile, "write_lock", _spy_write_lock)
+
     real_open = builtins.open
     real_path_open = Path.open
     real_write_text = Path.write_text
@@ -258,6 +275,76 @@ def test_precommit_module_does_not_import_pin_or_lock_writer():
     # The only mcp_warden internals it may pull in are capture + check_core.
     assert "check_core" in imported_modules
     assert "capture" in imported_modules
+
+
+# --- B2: internal pipeline exception -> exit 2, NOT 1 (drift) ----------------
+
+
+def test_internal_exception_exits_2_not_drift(monkeypatch, capsys):
+    """code-audit B2: a generic exception raised inside the check pipeline (e.g.
+    a pydantic ValidationError or AttributeError on an unexpected model shape)
+    must route to exit 2 (internal error), NEVER exit 1 — because exit 1 means
+    ONLY confirmed drift. We monkeypatch the check entry point the wrapper
+    actually calls (``precommit.run_check``) so it raises a RuntimeError, and
+    assert the wrapper fails closed with a clear internal-error message at 2.
+    """
+    monkeypatch.chdir(REPO_ROOT)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulated compute_drift explosion")
+
+    monkeypatch.setattr(precommit, "run_check", _boom)
+
+    rc = precommit.main(["--lock", CLEAN_LOCK, "--", "python", CLEAN_SERVER])
+    assert rc == 2, "an internal exception must NOT masquerade as a drift verdict (exit 1)"
+    err = capsys.readouterr().err
+    assert "internal error" in err.lower()
+    assert "RuntimeError" in err  # the exception type aids debugging
+    assert "NOT a drift" in err  # explicitly disclaims the drift verdict
+
+
+# --- B3: server argv secrets must NEVER leak to stderr -----------------------
+
+
+def test_capture_error_does_not_leak_secret_in_argv(monkeypatch, capsys):
+    """code-audit B3 (SECURITY): a secret planted in the server argv must NEVER
+    appear in stderr. pre-commit captures stderr to logs (~/.pre-commit-logs),
+    CI logs, and scrollback. Mirrors the planted-secret convention in
+    tests/test_diff.py (sk-PLANTEDSECRET123). We use a non-existent executable so
+    capture raises CaptureError (the path that previously shlex.join'd the full
+    argv), and assert the planted token is absent from the warning.
+    """
+    monkeypatch.chdir(REPO_ROOT)
+    secret = "SUPERSECRET123"
+    rc = precommit.main(
+        [
+            "--lock",
+            CLEAN_LOCK,
+            "--timeout",
+            "8",
+            "--",
+            "this-command-does-not-exist-xyz",
+            "--token",
+            secret,
+        ]
+    )
+    assert rc == 0  # non-strict: server-unavailable -> warn + pass
+    err = capsys.readouterr().err
+    assert secret not in err, "server argv secret leaked into stderr (B3 regression)"
+    assert "SUPERSECRET" not in err
+    # The change is still observable: argv[0] + a redaction marker are shown.
+    assert "this-command-does-not-exist-xyz" in err
+    assert "redacted" in err
+
+
+def test_redact_server_hides_args_keeps_executable():
+    """_redact_server echoes only argv[0] + a redacted arg count (B3 helper)."""
+    redacted = precommit._redact_server("node", ["server.js", "--api-key", "SUPERSECRET123"])
+    assert "SUPERSECRET123" not in redacted
+    assert redacted.startswith("node")
+    assert "redacted" in redacted
+    # zero-arg case renders the bare command (nothing to redact).
+    assert precommit._redact_server("python", []) == "python"
 
 
 # --- .pre-commit-hooks.yaml structural invariants ----------------------------

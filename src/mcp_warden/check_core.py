@@ -12,6 +12,13 @@ The sequence here mirrors what ``check`` has always done:
 # function's signature and exception contract (CaptureError for spawn/timeout
 # failures; FileNotFoundError / ValueError for a missing/invalid lock). Do not
 # change either without updating precommit.py.
+#
+# DETERMINISM: this shared verdict path MUST stay free of environment-dependent
+# behavior (cwd-, time-, locale-, or env-var-conditioned branches). The local
+# pre-commit hook and CI both reach the drift verdict through this exact code, so
+# any non-deterministic branch here would let a local hook verdict diverge from
+# CI — the precise failure ("a hook that disagrees with CI") this module exists
+# to prevent.
 """
 
 from __future__ import annotations

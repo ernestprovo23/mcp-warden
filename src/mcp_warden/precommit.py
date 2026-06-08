@@ -35,7 +35,7 @@ identical across local and CI — only infra-failure handling differs.
 from __future__ import annotations
 
 import argparse
-import shlex
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -47,6 +47,22 @@ DEFAULT_LOCK_NAME = "warden.lock"
 DEFAULT_TIMEOUT = 30.0
 
 _PROG = "mcp-warden-precommit"
+
+
+def _redact_server(command: str, args: list[str]) -> str:
+    """Render the server launch argv for human output WITHOUT leaking secrets.
+
+    SECURITY (code-audit binding B3): the server argv may carry API keys/tokens
+    passed as CLI args. The project forbids printing ``server.command`` /
+    ``server.args`` (see ``SAFE_PROVENANCE_FIELDS`` in ``cli_diff.py``), and
+    pre-commit captures stderr to logs (``~/.pre-commit-logs``), CI logs, and
+    scrollback. We therefore echo ONLY the executable name (``argv[0]``) plus a
+    redacted count of the remaining args — never the args themselves.
+    """
+    if not args:
+        return command
+    n = len(args)
+    return f"{command} …({n} arg{'s' if n != 1 else ''} redacted)"
 
 # Guidance shown when no server argv is supplied. pre-commit cannot know the
 # adopter's server command, so it must be configured explicitly.
@@ -108,6 +124,12 @@ def _repo_root() -> Path | None:
     hook from any directory, but warden.lock paths and the server command are
     resolved relative to the repo root in CI. Normalizing cwd here makes the
     local hook's verdict identical to CI regardless of the invocation dir.
+
+    DELIBERATE: returning None (not a git repo, or ``git rev-parse`` fails) makes
+    the caller fall back to the current cwd — this is the INTENTIONAL non-strict
+    path and MUST NOT be "fixed" into a hard block. The distinction matters:
+    *can't FIND* a repo root = non-strict caller-cwd fallback; *found one but
+    can't chdir into it* = fail closed (exit 2, handled in :func:`main`, B1).
     """
     try:
         out = subprocess.run(
@@ -160,15 +182,29 @@ def main(argv: list[str] | None = None) -> int:
     root = _repo_root()
     if root is not None:
         try:
-            import os
-
             os.chdir(root)
         except OSError as exc:
-            print(f"mcp-warden: warning: could not chdir to repo root {root}: {exc}", file=sys.stderr)
+            # code-audit binding B1: FAIL CLOSED. We FOUND a repo root but cannot
+            # chdir into it. Continuing with the wrong cwd would resolve the lock
+            # and server against the wrong directory -> could read a stale/absent
+            # lock and yield a spurious clean (exit 0) on a genuinely drifted
+            # surface. That is a cardinal-rule violation, so we exit 2 (infra
+            # error) instead of proceeding. (Contrast: _repo_root() returning
+            # None = "can't FIND a repo root" -> intentional caller-cwd fallback.)
+            print(
+                f"mcp-warden: error: could not chdir to repo root {root}: {exc}\n"
+                "mcp-warden: refusing to run against the wrong directory (fail-closed).",
+                file=sys.stderr,
+            )
+            return 2
 
     command, args = server_cmd[0], list(server_cmd[1:])
     lock_path = Path(ns.lock)
     timeout_s = float(ns.timeout)
+
+    # code-audit binding B3: render the server identity through _redact_server so
+    # secret-bearing argv (api keys/tokens) never reach stderr / pre-commit logs.
+    server_str = _redact_server(command, args)
 
     try:
         drift = run_check(command, args, lock_path, timeout_s)
@@ -177,7 +213,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"mcp-warden: error: {exc}", file=sys.stderr)
         return 2
     except CaptureError as exc:
-        server_str = shlex.join([command, *args])
         msg = (
             f"mcp-warden: could not capture the MCP server surface "
             f"(timeout={timeout_s}s, server=`{server_str}`): {exc}"
@@ -193,6 +228,24 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 0
+    except Exception as exc:  # noqa: BLE001 — see B2 rationale below.
+        # code-audit binding B2: any OTHER exception from the check pipeline
+        # (run_checks / build_lock / compute_drift — e.g. a pydantic
+        # ValidationError or an AttributeError on an unexpected model shape) must
+        # NOT propagate. An uncaught exception makes Python exit 1, which is
+        # INDISTINGUISHABLE from a confirmed-drift verdict and poisons the
+        # "exit 1 == only confirmed drift" invariant. Route it to exit 2
+        # (infra/internal error). We name the exception type and message for
+        # debuggability but render the server identity through _redact_server
+        # (B3) so no secret-bearing argv leaks into the error.
+        print(
+            f"mcp-warden: internal error while checking server `{server_str}`: "
+            f"{type(exc).__name__}: {exc}\n"
+            "mcp-warden: this is an mcp-warden bug or environment fault, NOT a drift "
+            "verdict; treating as an internal error (exit 2). Please report it.",
+            file=sys.stderr,
+        )
+        return 2
 
     if drift:
         _print_drift_summary(drift, ns.lock)
