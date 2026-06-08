@@ -196,12 +196,21 @@ def register(app: typer.Typer, console: Console, err_console: Console) -> None:
         try:
             a = read_lock(lock_a)
             b = read_lock(lock_b)
-        except (FileNotFoundError, ValueError) as exc:
+            drift = compute_drift(a, b)
+            # Compute provenance diffs ONCE (A4): the displayed list and the M6
+            # hidden-count are both derived from this single computation, so the
+            # "(N hidden)" message always matches what would render. A missing
+            # allowlisted field surfaces here as AttributeError (2-arg getattr in
+            # _safe_provenance) and is caught below -> fail closed (exit 2).
+            all_prov_diffs = _provenance_diffs(a, b)
+        except (FileNotFoundError, ValueError, AttributeError) as exc:
+            # Fail CLOSED: a malformed-but-parseable lock (e.g. a missing
+            # allowlisted provenance field) exits 2 instead of an uncaught
+            # traceback.
             err_console.print(f"[red]error:[/red] {exc}")
             raise typer.Exit(code=2) from exc
 
-        drift = compute_drift(a, b)
-        prov_diffs = [] if no_provenance else _provenance_diffs(a, b)
+        prov_diffs = [] if no_provenance else all_prov_diffs
 
         if sarif is not None:
             try:
@@ -220,8 +229,10 @@ def register(app: typer.Typer, console: Console, err_console: Console) -> None:
                 _render_provenance_section(console, prov_diffs)
             if not drift and not prov_diffs:
                 # M6: if --no-provenance hid real provenance differences, say so
-                # rather than a bare "no differences".
-                hidden = 0 if not no_provenance else len(_provenance_diffs(a, b))
+                # rather than a bare "no differences". Count comes from the
+                # already-computed all_prov_diffs (A4) — no double-compute, and
+                # the count matches what would have rendered.
+                hidden = len(all_prov_diffs) if no_provenance else 0
                 if hidden:
                     console.print(
                         f"[green]no integrity drift[/green] ({hidden} provenance "

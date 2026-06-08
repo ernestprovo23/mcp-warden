@@ -86,6 +86,7 @@ def test_diff_redaction_leak(tmp_path):
     assert every record's ``detail`` field is clean.
     """
     secret = "sk-PLANTEDSECRET123"
+    secret_b = "sk-DIFFERENTKEY456"
     base = _surface(
         [CapturedTool(name="t", input_schema={})],
         command="node",
@@ -94,7 +95,7 @@ def test_diff_redaction_leak(tmp_path):
     cur = _surface(
         [CapturedTool(name="t", input_schema={})],
         command="node",
-        args=["server.js", "--api-key", "sk-DIFFERENTKEY456"],
+        args=["server.js", "--api-key", secret_b],
     )
     a = _write(tmp_path, "a.lock", base)
     b = _write(tmp_path, "b.lock", cur)
@@ -107,21 +108,27 @@ def test_diff_redaction_leak(tmp_path):
     assert human.exit_code == 0 and js.exit_code == 0 and sa.exit_code == 0
     sarif_text = sarif_path.read_text(encoding="utf-8")
 
+    # BOTH locks carry a planted secret (A1): neither the baseline argv secret
+    # nor the current argv secret may appear in any of the three output blobs.
     for blob in (human.stdout, js.stdout, sarif_text):
         assert secret not in blob
         assert "PLANTEDSECRET" not in blob
+        assert secret_b not in blob
+        assert "DIFFERENTKEY" not in blob
 
     # The change must still be VISIBLE: hardcoded "launch changed" message row.
     assert "server-identity" in human.stdout
     assert "launch" in human.stdout.lower()
 
-    # Parse the JSONL and assert each record's detail field is clean (M2).
+    # Parse the JSONL and assert each record's detail field is clean of BOTH
+    # secrets (M2 / A1).
     records = [json.loads(line) for line in js.stdout.splitlines() if line.strip()]
     assert any(r.get("drift_class") == "server-identity" for r in records)
     for rec in records:
         detail = rec.get("detail")
         if detail is not None:
             assert "PLANTEDSECRET" not in detail and secret not in detail
+            assert "DIFFERENTKEY" not in detail and secret_b not in detail
 
 
 def test_provenance_only_difference_no_integrity_drift(tmp_path):
@@ -138,20 +145,26 @@ def test_provenance_only_difference_no_integrity_drift(tmp_path):
     b_lock.pin.rotation_count = 3
     b_lock.pin.approved = True
     b_lock.pin.approver = "alice@example.com"
-    b_lock.pin.approved_digest = b_lock.overall_digest
+    # A3: set approved_digest to a DISTINCT value (A defaults to None) and assert
+    # below that the change actually renders in the provenance section.
+    distinct_approved_digest = "sha256:approveddistinctvalue0000000000000000000000000000000000000000"
+    b_lock.pin.approved_digest = distinct_approved_digest
 
     a = tmp_path / "a.lock"
     b = tmp_path / "b.lock"
     write_lock(a_lock, a)
     write_lock(b_lock, b)
 
-    result = runner.invoke(app, ["diff", str(a), str(b), "--exit-code"])
+    result = runner.invoke(app, ["diff", str(a), str(b), "--exit-code"], env=_WIDE)
     assert result.exit_code == 0  # provenance-only does NOT trip --exit-code
     out = result.stdout
     assert "Provenance" in out
     assert "rotation_count" in out
     assert "approver" in out
     assert "alice@example.com" in out
+    # A3: the distinct approved_digest change is exercised and rendered.
+    assert "approved_digest" in out
+    assert distinct_approved_digest in out
 
 
 def test_exit_code_trips_on_integrity_drift(tmp_path):
