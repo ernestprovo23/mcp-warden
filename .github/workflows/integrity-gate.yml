@@ -19,7 +19,7 @@ jobs:
       # (checkout v5 / setup-python v6 / upload-artifact v6) to clear the
       # Node 20 deprecation warning. Bump majors deliberately, never float @main.
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v6
@@ -55,7 +55,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v6
@@ -117,7 +117,7 @@ jobs:
 
     steps:
       - name: Checkout (full history)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
