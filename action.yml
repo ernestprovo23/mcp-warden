@@ -88,13 +88,29 @@ runs:
       env:
         INPUT_SERVER_CMD: ${{ inputs.server-cmd }}
       run: |
-        if printf '%s' "$INPUT_SERVER_CMD" | grep -qP '[;|&$`\\<>(){}\n]' 2>/dev/null; then
-          echo "::error::mcp-warden: server-cmd contains a shell metacharacter or newline (; | & \$ \` \\ < > ( ) { } or newline). Provide a plain argv string." >&2
-          exit 1
-        fi
-        # POSIX fallback — grep -P not available on all platforms
-        if printf '%s' "$INPUT_SERVER_CMD" | LC_ALL=C grep -Eq $'[;|&$`\\\\<>(){}\n]'; then
-          echo "::error::mcp-warden: server-cmd contains a shell metacharacter or newline. Provide a plain argv string." >&2
+        # Reject server-cmd containing shell metacharacters or newlines.
+        # Uses bash `case` glob patterns only — pure POSIX, no regex, no external
+        # grep call; works identically on ubuntu / macos / windows (git-bash).
+        #
+        # Character list checked: ; | & $ ` \ < > ( ) { } and embedded newlines.
+        _bad=0
+        case "$INPUT_SERVER_CMD" in
+          *";"*)         _bad=1 ;;
+          *"|"*)         _bad=1 ;;
+          *"&"*)         _bad=1 ;;
+          *'$'*)         _bad=1 ;;
+          *'`'*)         _bad=1 ;;
+          *"\\"*)        _bad=1 ;;
+          *"<"*)         _bad=1 ;;
+          *">"*)         _bad=1 ;;
+          *"("*)         _bad=1 ;;
+          *")"*)         _bad=1 ;;
+          *"{"*)         _bad=1 ;;
+          *"}"*)         _bad=1 ;;
+          *$'\n'*)       _bad=1 ;;
+        esac
+        if [ "$_bad" -eq 1 ]; then
+          echo "::error::mcp-warden: server-cmd contains a shell metacharacter (; | & \$ \` \\ < > ( ) { }) or newline. Provide a plain argv string." >&2
           exit 1
         fi
 
