@@ -166,13 +166,22 @@ class FrameReader:
 
 
 def _parse_content_length(header_bytes: bytes) -> int | None:
-    """Parse the Content-Length value from a header block (case-insensitive)."""
+    """Parse the Content-Length value from a header block (case-insensitive).
+
+    A conformant Content-Length is a run of ASCII digits only. Python's ``int``
+    is too permissive for an untrusted wire header — it accepts a leading sign
+    (``-5`` -> a NEGATIVE length that mis-slices the body), digit-group
+    underscores (``1_000``), surrounding whitespace, and non-ASCII Unicode
+    digits. Any of those is a malformed frame, so we require ``^[0-9]+$`` and
+    return ``None`` otherwise (surfaced upstream as the visible fail-open
+    ``parse_error``). See issue #17 fuzz Finding A.
+    """
     for line in header_bytes.split(b"\r\n"):
         if line[: len(_CL_PREFIX)].lower() == _CL_PREFIX:
-            try:
-                return int(line[len(_CL_PREFIX) :].strip())
-            except ValueError:
-                return None
+            value = line[len(_CL_PREFIX) :].strip()
+            if value.isdigit() and value.isascii():
+                return int(value)
+            return None
     return None
 
 
