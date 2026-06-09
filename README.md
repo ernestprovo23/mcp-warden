@@ -357,6 +357,14 @@ The headline test is a real stdio round-trip: spawn the clean fixture → `pin` 
 re-run `check` against the mutated fixture → assert non-zero exit + the expected
 drift + SARIF finding.
 
+The live runtime attack surface — the stdio JSON-RPC **framer**, the ANSI/control
+**stripper**, the exfil-**domain** matcher, and the secret **redactor** — is
+additionally **property-fuzzed** with [`hypothesis`](https://hypothesis.works/)
+under `tests/fuzz/` (construction-based liveness + soundness properties: a
+known-malicious input IS detected, and the parser never invents, leaks, or
+misclassifies). The deep soak runs via `make fuzz`; see
+[`CONTRIBUTING.md`](CONTRIBUTING.md#fuzzing).
+
 ## Contributing & security
 
 Contributions are welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md) for the dev

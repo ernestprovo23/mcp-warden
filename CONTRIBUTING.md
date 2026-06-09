@@ -57,6 +57,50 @@ A change is not done until `.venv/bin/python -m pytest -q` is fully green.
 
 ---
 
+## Fuzzing
+
+The guard's live runtime attack surface — the stdio JSON-RPC **framer**
+(`framing`), the ANSI/control **stripper** (`res_rules`/`res_catalog`), the
+exfil-**domain** matcher (`res_net`), and the secret **redactor** (`redact`) — is
+property-fuzzed with [`hypothesis`](https://hypothesis.works/) under
+`tests/fuzz/`. A parser bug here is a *silent inspection bypass* (framing errors
+fail OPEN by design), exactly the class hash-checking misses, so the properties
+are **construction-based** with explicit **liveness** (a known-malicious input IS
+detected/blocked) and **soundness** (the engine never invents, leaks, or
+misclassifies) — a no-op implementation must FAIL them.
+
+The fuzz suite runs in the normal `pytest -q` path (it lives under `tests/`).
+Two hypothesis profiles are registered in `tests/fuzz/conftest.py`, selected by
+`HYPOTHESIS_PROFILE` (default `ci`):
+
+- **`ci`** — `max_examples=1000`, `derandomize=True`, `deadline=None`, no example
+  DB. Deterministic and source-replayable; this is what CI runs (with a fixed
+  `--hypothesis-seed=0`). 1000 (not the hypothesis default of 100) because these
+  guard a **security boundary**, not application behavior — each soundness/
+  liveness invariant needs a meaningful sample of the constructed-malicious +
+  boundary input space, and 1000 keeps the whole suite under a minute.
+- **`fuzz`** — `max_examples=20000` + a persistent example DB. The deep local
+  soak for hunting new counterexamples.
+
+```bash
+# deterministic ci-profile run (what CI does)
+make fuzz-ci          # == pytest tests/fuzz -p no:randomly --hypothesis-seed=0
+
+# deep local soak (20k examples/property, persistent .hypothesis DB)
+make fuzz             # == HYPOTHESIS_PROFILE=fuzz pytest tests/fuzz -p no:randomly
+```
+
+**`@example`-freezing policy (mandatory).** Every counterexample the fuzzer finds
+during development MUST be frozen as a hypothesis `@example(...)` on the relevant
+property *before* the fix lands, so it persists as a permanent regression even
+outside the deep `fuzz` run (the `ci` profile uses no example DB). Never paper
+over a finding with a blind `xfail`: a hypothesis failure is a real finding —
+either the property models the contract wrong (fix the property) or it is a
+genuine parser/redactor/framer bug (fix the production code in-scope if small,
+else file an issue and freeze the `@example` with a tracking link).
+
+---
+
 ## The specs in `docs/` are the source of truth
 
 The files under `docs/` are the **security contract** — they define every
