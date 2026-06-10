@@ -1,0 +1,38 @@
+# Example (d): private repo without GitHub Advanced Security — upload-sarif: false.
+#
+# Private repos without GHAS (and fork pull requests) cannot upload SARIF to code
+# scanning: the security-events: write permission is unavailable. Set
+# upload-sarif: false so the gate still runs and still fails the build on drift,
+# but skips the upload step instead of erroring on a missing permission.
+#
+# The SARIF file is still written to disk, so you can publish it as a build
+# artifact for offline review (shown below).
+name: MCP integrity (private repo)
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    name: Check MCP surface (no code scanning)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # no security-events: write needed when upload-sarif: false
+    steps:
+      - uses: actions/checkout@v4
+      - id: warden
+        uses: ernestprovo23/mcp-warden@v0
+        with:
+          server-cmd: "node ./build/index.js"
+          lock: "warden.lock"
+          sarif: "mcp-warden.sarif"
+          upload-sarif: "false"    # required for private repos without GHAS / fork PRs
+      # Keep the SARIF as a build artifact since it is not uploaded to code scanning.
+      - name: Upload SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-warden-sarif
+          path: mcp-warden.sarif
+          if-no-files-found: warn

@@ -1,0 +1,95 @@
+name: Examples
+
+# Keeps examples/ honest:
+#   1. lint  — YAML-lint every example workflow so a broken copy-paste template
+#      can never merge.
+#   2. check — re-run `mcp-warden check` against each committed lock under
+#      examples/pinned-servers/ so the example locks stay green (a drifted
+#      upstream server or a stale lock fails this job).
+#
+# All third-party actions are pinned to a full 40-char commit SHA with a version
+# comment (enforced by tests/test_workflow_pins.py).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Job 1: YAML-lint the example workflows.
+  # --------------------------------------------------------------------------
+  lint:
+    name: YAML lint example workflows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Install yamllint
+        run: pip install "yamllint==1.35.1"
+
+      # Lint the example workflow / CI / config YAML. The relaxed ruleset focuses
+      # on syntactic validity and basic hygiene rather than strict formatting,
+      # since these are copy-paste templates authored for readability.
+      - name: Lint example YAML
+        run: |
+          yamllint -d relaxed \
+            examples/github-actions \
+            examples/gitlab-ci \
+            examples/pre-commit
+
+  # --------------------------------------------------------------------------
+  # Job 2: re-check the committed example locks.
+  #
+  # Launches each real, openly-available server via its PINNED ref and verifies
+  # the committed warden.lock still matches the live surface. No paid creds, no
+  # secrets — every server is public.
+  # --------------------------------------------------------------------------
+  check-locks:
+    name: Re-check committed example locks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.11"
+
+      # Node provides npx for the @modelcontextprotocol/* servers.
+      - name: Set up Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Install mcp-warden
+        run: pip install -e .
+
+      - name: "check: server-everything (npx, pinned @2026.1.26)"
+        run: |
+          mcp-warden check \
+            --lock examples/pinned-servers/server-everything/warden.lock \
+            --timeout 120 \
+            -- npx -y @modelcontextprotocol/server-everything@2026.1.26
+
+      - name: "check: server-memory (npx, pinned @2026.1.26)"
+        run: |
+          mcp-warden check \
+            --lock examples/pinned-servers/server-memory/warden.lock \
+            --timeout 120 \
+            -- npx -y @modelcontextprotocol/server-memory@2026.1.26
+
+      - name: "check: server-sequential-thinking (npx, pinned @2025.12.18)"
+        run: |
+          mcp-warden check \
+            --lock examples/pinned-servers/server-sequential-thinking/warden.lock \
+            --timeout 120 \
+            -- npx -y @modelcontextprotocol/server-sequential-thinking@2025.12.18

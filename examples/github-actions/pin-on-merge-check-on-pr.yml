@@ -1,0 +1,57 @@
+# Example (a): pin-on-merge + check-on-PR.
+#
+# Two jobs in one file:
+#   * check-on-pr  — runs on every pull_request; the integrity gate that blocks
+#     a drifted MCP surface from merging. upload-sarif stays at its default
+#     (true) so PR drift shows up in code scanning.
+#   * pin-on-merge — runs only on push to main; re-pins the surface and opens a
+#     commit only when the surface legitimately changed AND a human re-approves.
+#     This job is intentionally manual-gated (workflow_dispatch) so a merge
+#     never silently re-baselines the lock — re-pinning is a reviewed action.
+#
+# Copy this into .github/workflows/ in your own repo and replace the server-cmd.
+name: MCP integrity
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  check-on-pr:
+    name: Check MCP surface (PR gate)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # required for the default upload-sarif: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ernestprovo23/mcp-warden@v0
+        with:
+          server-cmd: "node ./build/index.js"
+          lock: "warden.lock"
+
+  # Re-pin is a deliberate, human-triggered action (workflow_dispatch), never an
+  # automatic side effect of merging. It captures the new surface and writes a
+  # fresh lock for review; commit it only after a human approves the diff.
+  pin-on-merge:
+    name: Re-pin MCP surface (manual)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install mcp-warden
+        run: pip install mcp-warden
+      - name: Re-pin surface (writes warden.lock for review)
+        run: |
+          mcp-warden pin node ./build/index.js \
+            --approve --approver "${{ github.actor }}" \
+            --lock warden.lock
+      - name: Show the new lock (commit it after a human reviews the diff)
+        run: git --no-pager diff -- warden.lock || true

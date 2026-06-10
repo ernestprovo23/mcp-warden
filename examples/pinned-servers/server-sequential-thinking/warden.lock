@@ -1,0 +1,173 @@
+{
+  "schema_version": 3,
+  "warden_version": "0.3.0",
+  "server": {
+    "command": "npx",
+    "args": [
+      "-y",
+      "@modelcontextprotocol/server-sequential-thinking@2025.12.18"
+    ],
+    "command_digest": "sha256:96a06b285fe3292c53860204b94bcadfe7ce68fbd79bd77baee6eaaf41111d6d"
+  },
+  "tools": [
+    {
+      "name": "sequentialthinking",
+      "description_hash": "sha256:c0e7d6fa7a318b31cc428cc694acc1f1a93ac3c85807fb2bbeecc10ba82939a0",
+      "input_schema_hash": "sha256:bc2bcac34793982f4be4d766c6155aab9ed2c63758adadb6a1a38becf548ad59",
+      "capabilities": [],
+      "schema_skeleton": {
+        "props": {
+          "$root": {
+            "type": [
+              "object"
+            ],
+            "required": false,
+            "enum": null,
+            "constraints": {
+              "additionalProperties": true
+            }
+          },
+          "branchFromThought": {
+            "type": [
+              "integer"
+            ],
+            "required": false,
+            "enum": null,
+            "constraints": {
+              "additionalProperties": true,
+              "maximum": 9007199254740991,
+              "minimum": 1
+            }
+          },
+          "branchId": {
+            "type": [
+              "string"
+            ],
+            "required": false,
+            "enum": null,
+            "constraints": {
+              "additionalProperties": true
+            }
+          },
+          "isRevision": {
+            "type": [
+              "boolean"
+            ],
+            "required": false,
+            "enum": null,
+            "constraints": {
+              "additionalProperties": true
+            }
+          },
+          "needsMoreThoughts": {
+            "type": [
+              "boolean"
+            ],
+            "required": false,
+            "enum": null,
+            "constraints": {
+              "additionalProperties": true
+            }
+          },
+          "nextThoughtNeeded": {
+            "type": [
+              "boolean"
+            ],
+            "required": true,
+            "enum": null,
+            "constraints": {
+              "additionalProperties": true
+            }
+          },
+          "revisesThought": {
+            "type": [
+              "integer"
+            ],
+            "required": false,
+            "enum": null,
+            "constraints": {
+              "additionalProperties": true,
+              "maximum": 9007199254740991,
+              "minimum": 1
+            }
+          },
+          "thought": {
+            "type": [
+              "string"
+            ],
+            "required": true,
+            "enum": null,
+            "constraints": {
+              "additionalProperties": true
+            }
+          },
+          "thoughtNumber": {
+            "type": [
+              "integer"
+            ],
+            "required": true,
+            "enum": null,
+            "constraints": {
+              "additionalProperties": true,
+              "maximum": 9007199254740991,
+              "minimum": 1
+            }
+          },
+          "totalThoughts": {
+            "type": [
+              "integer"
+            ],
+            "required": true,
+            "enum": null,
+            "constraints": {
+              "additionalProperties": true,
+              "maximum": 9007199254740991,
+              "minimum": 1
+            }
+          }
+        }
+      },
+      "entry_digest": "sha256:2a4b66d61c405ac5be578cae31b0b41246afa751b4746fbfdce1f538c93a065a"
+    }
+  ],
+  "resources": [],
+  "prompts": [],
+  "findings": [
+    {
+      "rule_id": "WRD-SEC-ENTROPY",
+      "severity": "high",
+      "target": "launch/command",
+      "message": "WRD-SEC-ENTROPY: high-entropy token (possible secret)",
+      "snippet": "mode…(len=47)"
+    }
+  ],
+  "overall_digest": "sha256:714be5f26176d84f3804d5f91643b5d782f2a3b82d7e5e1e41f986b833395d1d",
+  "pin": {
+    "created_at": "2026-06-10T23:49:05Z",
+    "warden_version": "0.3.0",
+    "mcp_protocol_version": "2025-11-25",
+    "approved": true,
+    "approver": "examples@mcp-warden.invalid",
+    "approved_at": "2026-06-10T23:49:05Z",
+    "approved_digest": "sha256:714be5f26176d84f3804d5f91643b5d782f2a3b82d7e5e1e41f986b833395d1d",
+    "provenance_version": 1,
+    "pinner": {
+      "tool": "mcp-warden",
+      "tool_version": "0.3.0",
+      "actor": null,
+      "environment": null
+    },
+    "attestations": [
+      {
+        "actor": "examples@mcp-warden.invalid",
+        "role": "approver",
+        "method": "manual",
+        "created_at": "2026-06-10T23:49:05Z",
+        "bound_digest": "sha256:714be5f26176d84f3804d5f91643b5d782f2a3b82d7e5e1e41f986b833395d1d",
+        "note": null
+      }
+    ],
+    "rotated_at": null,
+    "rotation_count": 0
+  }
+}

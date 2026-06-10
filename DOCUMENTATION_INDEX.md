@@ -40,6 +40,20 @@ verdict because both call the shared `check_core.run_check` sequence.
 | [`src/mcp_warden/precommit.py`](src/mcp_warden/precommit.py) | Wrapper entry point (`mcp-warden-precommit`): `--` server-argv contract, cwd-normalization to git root, non-strict-vs-`--strict` server-unavailability handling; check-only (never writes the lock) |
 | [`tests/test_precommit.py`](tests/test_precommit.py) | arg parsing, empty-cmd guidance, clean/drift exit codes, server-unavailable (non-strict 0 / strict 2), cwd normalization, lock write-protection (runtime spy + static import check), `.pre-commit-hooks.yaml` invariants |
 
+## Worked-example gallery (`examples/` — Issue #46)
+
+Copy-paste integration examples, kept green by the `Examples` CI workflow (YAML-lints
+the example workflows + re-checks the committed pinned-server locks on every run).
+
+| Artifact | Purpose |
+|----------|---------|
+| [`examples/README.md`](examples/README.md) | Gallery index; links each example back to the core docs |
+| [`examples/github-actions/`](examples/github-actions/) | Four GitHub Action workflows: (a) pin-on-merge + check-on-PR, (b) matrix over multiple servers, (c) SARIF upload, (d) `upload-sarif: false` for private repos |
+| [`examples/gitlab-ci/.gitlab-ci.yml`](examples/gitlab-ci/.gitlab-ci.yml) | Equivalent check gate on GitLab CI |
+| [`examples/pre-commit/.pre-commit-config.yaml`](examples/pre-commit/.pre-commit-config.yaml) | Minimal + pre-push hook variants (mirror the README hook) |
+| [`examples/pinned-servers/`](examples/pinned-servers/) | Three real, openly-available MCP servers (`server-everything`, `server-memory`, `server-sequential-thinking`) each pinned to a committed `warden.lock` via a pinned launcher ref, with a per-server README (exact `pin` argv + sample `check`) |
+| [`.github/workflows/examples.yml`](.github/workflows/examples.yml) | CI: yamllint the example workflows + re-run `check` against every committed example lock |
+
 ## Security contract (`docs/` — source of truth, do not duplicate)
 
 | Doc | Defines |

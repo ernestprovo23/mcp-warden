@@ -1,0 +1,38 @@
+# Example (c): integrity gate with SARIF upload to GitHub code scanning.
+#
+# This is the default mode of the action (upload-sarif defaults to true). The
+# action writes a SARIF report and uploads it to the repo's code-scanning view,
+# so drift findings appear in the Security tab and on the PR. This requires the
+# security-events: write permission and GitHub Advanced Security (free on public
+# repos; a paid add-on for private repos — see private-repo-no-sarif.yml).
+name: MCP integrity (SARIF upload)
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    name: Check MCP surface + upload SARIF
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # required to upload SARIF to code scanning
+    steps:
+      - uses: actions/checkout@v4
+      - id: warden
+        uses: ernestprovo23/mcp-warden@v0
+        with:
+          server-cmd: "node ./build/index.js"
+          lock: "warden.lock"
+          sarif: "mcp-warden.sarif"
+          upload-sarif: "true"     # the default; shown here for clarity
+          category: "mcp-warden"
+      # The action surfaces the raw check exit code (0 clean / 1 drift / 2 error)
+      # for downstream steps even though the gate itself already failed the job
+      # on drift.
+      - name: Report exit code
+        if: always()
+        run: echo "mcp-warden exit code = ${{ steps.warden.outputs.exit-code }}"
