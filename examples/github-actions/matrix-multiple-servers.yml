@@ -1,0 +1,45 @@
+# Example (b): matrix over multiple MCP servers.
+#
+# One job, fanned out over a matrix of (server-cmd, lock, category) triples.
+# Each matrix leg runs the integrity gate against one server and uploads its
+# SARIF under a distinct `category` so code-scanning keeps the results separate
+# (re-using one category across servers would overwrite findings).
+#
+# fail-fast: false keeps every server checked even if one drifts, so a single
+# rug-pull does not mask drift in the others.
+name: MCP integrity (matrix)
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    name: "Check ${{ matrix.name }}"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: filesystem
+            server-cmd: "node ./servers/filesystem/index.js"
+            lock: "locks/filesystem.warden.lock"
+            category: "mcp-warden-filesystem"
+          - name: memory
+            server-cmd: "npx -y @modelcontextprotocol/server-memory@2026.1.26"
+            lock: "locks/memory.warden.lock"
+            category: "mcp-warden-memory"
+          - name: search
+            server-cmd: "python ./servers/search/server.py"
+            lock: "locks/search.warden.lock"
+            category: "mcp-warden-search"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ernestprovo23/mcp-warden@v0
+        with:
+          server-cmd: ${{ matrix.server-cmd }}
+          lock: ${{ matrix.lock }}
+          category: ${{ matrix.category }}

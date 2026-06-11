@@ -1,0 +1,33 @@
+# GitLab CI equivalent of the GitHub Action check gate.
+#
+# GitLab has no reusable composite action, so this installs mcp-warden from PyPI
+# and runs `check` directly — the same gate the GitHub Action wraps. The job
+# fails (non-zero `check` exit) the moment the server surface drifts from the
+# committed warden.lock.
+#
+# Pin mcp-warden to an exact version for supply-chain hygiene, the same way you
+# would pin the GitHub Action to a release tag.
+stages:
+  - integrity
+
+mcp-integrity:
+  stage: integrity
+  image: python:3.11-slim
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  before_script:
+    - pip install "mcp-warden==0.3.0"
+  script:
+    # Re-capture the server surface and diff it against the committed lock.
+    # Exit 0 = clean, 1 = drift (job fails), 2 = capture/IO error (job fails).
+    - mcp-warden check node ./build/index.js
+        --lock warden.lock
+        --sarif mcp-warden.sarif
+  # Keep the SARIF report regardless of pass/fail so drift findings are
+  # downloadable from the pipeline.
+  artifacts:
+    when: always
+    paths:
+      - mcp-warden.sarif
+    expire_in: 30 days

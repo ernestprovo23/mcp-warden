@@ -1,0 +1,29 @@
+# mcp-warden pre-commit hook — minimal + pre-push variants.
+#
+# Mirrors the README "pre-commit hook" section exactly. The hook reuses the same
+# capture -> checks -> drift path as `mcp-warden check`, so a local pass/fail can
+# never disagree with CI.
+#
+# Install once with: pre-commit install
+# (and `pre-commit install --hook-type pre-push` to enable the pre-push variant)
+#
+# Everything after the `--` separator is your MCP server launch argv. The
+# `--lock` path is resolved relative to your git repo root.
+repos:
+  # --- Variant 1 (minimal): run on every commit ---------------------------
+  - repo: https://github.com/ernestprovo23/mcp-warden
+    rev: v0.3.0                       # pin to a release tag (supply-chain hygiene)
+    hooks:
+      - id: mcp-warden-check
+        args: [--lock, warden.lock, --, node, ./build/index.js]
+
+  # --- Variant 2 (pre-push): run only on `git push`, not every commit -----
+  # Spawning the server on every commit adds latency; teams that find this too
+  # slow can move the gate to pre-push. Drift still blocks the push (exit 1).
+  # Enable with: pre-commit install --hook-type pre-push
+  - repo: https://github.com/ernestprovo23/mcp-warden
+    rev: v0.3.0
+    hooks:
+      - id: mcp-warden-check
+        stages: [pre-push]
+        args: [--lock, warden.lock, --, node, ./build/index.js]
