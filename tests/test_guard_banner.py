@@ -14,13 +14,16 @@ proves, at two levels:
     assert ``--quiet`` suppresses the banner while the default emits it, and that
     a ``--no-block-*`` opt-out flows all the way through cfg -> banner -> stderr.
 
-Ground-truth note (deliberate, not a bug): the shipped deterministic catalog has
-exactly THREE default-blocking result rules — ``WRD-RES-ANSI``,
-``WRD-RES-SECRET-ECHO``, ``WRD-RES-EXFIL-DOMAIN`` (``result_inspection.BLOCK_RULES``).
-There is NO ``WRD-RES-EXFIL-IP-LITERAL`` rule in the code (the exfil evaluator is
-host/domain denylist matching only). The banner enumerates the three that exist;
-``test_banner_does_not_fabricate_ip_literal_tier`` asserts it never invents the
-non-existent fourth tier (it reflects ACTUAL behavior, not aspirational prose).
+Ground-truth note (derivation, not enumeration): the banner's BLOCKING bucket is
+DERIVED from ``result_inspection.BLOCK_RULES`` — the catalog's single source of
+truth for which deterministic result rules block — so it tracks whatever the
+catalog actually blocks at any merge order.
+``test_banner_blocking_set_equals_enabled_block_rules`` asserts the rendered
+blocking-rule set EQUALS the ``BLOCK_RULES`` members enabled under the given
+config (so it never fabricates a tier that is NOT in ``BLOCK_RULES``, and never
+omits one that is), and ``test_banner_blocking_is_live_to_block_rules`` proves the
+derivation is live by extending ``BLOCK_RULES`` with a synthetic rule and showing
+the banner picks it up (a hardcoded renderer would fail this).
 
 Redaction invariant: the banner takes ONLY ``cfg`` (never ``command``/``args``),
 so a secret-bearing server argv can never reach it.
@@ -28,8 +31,12 @@ so a secret-bearing server argv can never reach it.
 
 from __future__ import annotations
 
+import re
+
 import mcp_warden.cli_guard as cli_guard
+import mcp_warden.guard_banner as guard_banner
 import mcp_warden.guard_lifecycle as guard_lifecycle
+import mcp_warden.result_inspection as result_inspection
 from mcp_warden.guard_banner import render_posture_banner
 from mcp_warden.guard_loop import GuardConfig
 
@@ -138,21 +145,77 @@ def test_no_block_exfil_domain_drops_exfil_from_blocking():
     assert _SECRET in block
 
 
-def test_banner_does_not_fabricate_ip_literal_tier():
-    # Ground truth: there is no WRD-RES-EXFIL-IP-LITERAL rule in the code. The
-    # banner must reflect ACTUAL behavior, so it must NEVER name that tier (under
-    # any posture), regardless of the prose elsewhere claiming four tiers.
-    for cfg in (
-        GuardConfig(),
-        GuardConfig(no_block_exfil_domain=True),
-        GuardConfig(audit_only=True),
-        GuardConfig(armed_list_changed=True, armed_policy=True),
-    ):
+def _blocking_block_rule_ids(banner: str) -> set[str]:
+    """The set of ``result_inspection.BLOCK_RULES`` ids rendered in BLOCKING.
+
+    Parses the deterministic block-rule ids out of the BLOCKING bucket. Filters to
+    BLOCK_RULES membership so the non-deterministic tiers that legitimately appear
+    in the bucket (``WRD-RES-INJECT-PHRASE`` opt-in, the drift gate, the policy
+    deny) do not pollute the comparison against ``BLOCK_RULES``.
+    """
+    block = _blocking_section(banner)
+    ids = set(re.findall(r"WRD-RES-[A-Z0-9-]+", block))
+    return ids & set(result_inspection.BLOCK_RULES)
+
+
+def test_banner_blocking_set_equals_enabled_block_rules():
+    # DERIVATION ground truth: the banner's BLOCKING bucket must list EXACTLY the
+    # result_inspection.BLOCK_RULES members that are enabled under the given config
+    # — derived from BLOCK_RULES, never a hardcoded list. This:
+    #   * passes on this branch (BLOCK_RULES=3 -> banner shows 3),
+    #   * AUTO-passes once the IP-literal rule lands in BLOCK_RULES (=4 -> 4),
+    #   * still catches fabrication (a BLOCK_RULES tier in the banner that is not
+    #     actually enabled, or a tier that is not in BLOCK_RULES at all).
+    cases = (
+        GuardConfig(),  # all deterministic block rules on
+        GuardConfig(no_block_exfil_domain=True),  # one opted out
+        GuardConfig(no_block_ansi=True, no_block_secret_echo=True),  # two opted out
+        GuardConfig(armed_list_changed=True, armed_policy=True),  # gates armed, det unchanged
+    )
+    for cfg in cases:
         banner = render_posture_banner(cfg)
-        lowered = banner.lower()
-        assert "ip-literal" not in lowered
-        assert "ip_literal" not in lowered
-        assert "ip literal" not in lowered
+        expected = {rid for rid in result_inspection.BLOCK_RULES if cfg.category_enabled(rid)}
+        assert _blocking_block_rule_ids(banner) == expected, (
+            f"BLOCKING bucket must equal the config-enabled subset of BLOCK_RULES for {cfg!r}"
+        )
+
+
+def test_banner_blocking_is_live_to_block_rules(monkeypatch):
+    # LIVENESS: prove the BLOCKING bucket is DERIVED from BLOCK_RULES at runtime,
+    # not enumerated from a frozen list. Extend BLOCK_RULES + the label map with a
+    # synthetic rule and assert the banner picks it up. A hardcoded renderer that
+    # ignores BLOCK_RULES would NOT render the synthetic tier -> this test fails it.
+    synthetic = "WRD-RES-SYNTHETIC-LIVENESS"
+    extended = frozenset(result_inspection.BLOCK_RULES | {synthetic})
+    monkeypatch.setattr(result_inspection, "BLOCK_RULES", extended)
+    monkeypatch.setattr(guard_banner, "BLOCK_RULES", extended)
+    monkeypatch.setattr(
+        guard_banner,
+        "_DET_TIERS",
+        (*guard_banner._DET_TIERS, (synthetic, "synthetic liveness block")),
+    )
+    # The synthetic rule has no no_block_* opt-out field; category_enabled returns
+    # False for unknown ids, so make it enabled by registering an opt-out mapping.
+    monkeypatch.setitem(GuardConfig._DET_OPTOUT, synthetic, "no_block_ansi")
+
+    banner = render_posture_banner(GuardConfig())
+    block = _blocking_section(banner)
+    assert synthetic in block, "derivation is not live: banner ignored an added BLOCK_RULES id"
+    # And it shows up in the equality test's derived set too (full consistency).
+    assert synthetic in _blocking_block_rule_ids(banner)
+
+
+def test_banner_renders_unmapped_block_rule_by_id(monkeypatch):
+    # DEFENSIVE: a BLOCK_RULES id with NO entry in the label map must still render
+    # (by id) rather than be silently dropped — never under-report posture.
+    unmapped = "WRD-RES-UNMAPPED-DEFENSE"
+    extended = frozenset(result_inspection.BLOCK_RULES | {unmapped})
+    monkeypatch.setattr(guard_banner, "BLOCK_RULES", extended)
+    monkeypatch.setitem(GuardConfig._DET_OPTOUT, unmapped, "no_block_ansi")
+
+    banner = render_posture_banner(GuardConfig())
+    block = _blocking_section(banner)
+    assert unmapped in block, "an unmapped BLOCK_RULES id must still render (by id), not vanish"
 
 
 # --- renderer: --strict flips fail-open -> fail-CLOSED -------------------------

@@ -19,14 +19,16 @@ and the ``armed_*`` / ``strict`` / ``strict_frame_cap`` fields. It NEVER takes t
 server ``command``/``args`` — the banner is POSTURE, not server identity, so a
 secret-bearing argv can never reach it (redaction invariant).
 
-Deterministic-tier ground truth (RESULT_INSPECTION.md §2,
-``result_inspection.BLOCK_RULES``): the shipped catalog has exactly THREE
-default-blocking deterministic result rules — ``WRD-RES-ANSI``,
-``WRD-RES-SECRET-ECHO``, ``WRD-RES-EXFIL-DOMAIN``. There is no separate
-``WRD-RES-EXFIL-IP-LITERAL`` rule in the code (the exfil evaluator is host/domain
-denylist matching only), so the banner enumerates the three that actually exist
-rather than the four the prose elsewhere mentions — it reflects ACTUAL runtime
-behavior, never aspirational copy.
+Deterministic-tier ground truth (RESULT_INSPECTION.md §2): the BLOCKING bucket is
+DERIVED from ``result_inspection.BLOCK_RULES`` — the single source of truth for
+which deterministic result rules block on the wire — so it tracks whatever the
+catalog actually blocks, regardless of how many rules ship. The banner walks a
+fixed, ordered label map (``_DET_TIERS``) and keeps only the ids that are both in
+``BLOCK_RULES`` AND enabled by config; membership is therefore DYNAMIC (catalog-
+driven) while order stays deterministic (map-driven, not frozenset iteration
+order). Any ``BLOCK_RULES`` id missing from the map falls back to rendering its
+rule id, so a blocking tier is never silently omitted. This reflects ACTUAL
+runtime behavior, never aspirational copy.
 
 The returned string is PLAIN TEXT (no ANSI/Rich markup): the CLI prints it via
 ``err_console.print(..., highlight=False)`` and tests assert on substrings, so it
@@ -37,13 +39,22 @@ must carry no embedded color codes — mirroring
 from __future__ import annotations
 
 from .guard_loop import GuardConfig
+from .result_inspection import BLOCK_RULES
 
-#: Each default-on deterministic result rule -> its human label in the banner.
-#: Order is fixed (deterministic output for tests + stable operator reading).
+#: Ordered label map for the deterministic BLOCKING tiers. Order here (NOT the
+#: ``BLOCK_RULES`` frozenset iteration order) fixes the banner's tier order, so
+#: output stays deterministic for tests + stable for operator reading. The map is
+#: a superset that may name rules not yet present in ``BLOCK_RULES`` on a given
+#: branch (e.g. the forward-ready IP-literal tier): the BLOCKING bucket is the
+#: INTERSECTION of this map with ``result_inspection.BLOCK_RULES``, filtered by
+#: per-rule config (``category_enabled``), so it tracks the real catalog at any
+#: merge order. Any ``BLOCK_RULES`` id absent from this map still renders (by id)
+#: rather than being dropped — a blocking tier is never silently omitted.
 _DET_TIERS: tuple[tuple[str, str], ...] = (
     ("WRD-RES-ANSI", "ANSI/control-codepoint scrub"),
     ("WRD-RES-SECRET-ECHO", "secret-echo block"),
     ("WRD-RES-EXFIL-DOMAIN", "exfil/callback-domain block"),
+    ("WRD-RES-EXFIL-IP-LITERAL", "exfil/SSRF raw-IP-literal block"),
 )
 
 #: Banner delimiter (mirrors the platform-refusal banner width/style).
@@ -109,9 +120,20 @@ def _blocking_lines(cfg: GuardConfig) -> list[str]:
         ]
 
     active: list[str] = []
-    for rule_id, label in _DET_TIERS:
+    # BLOCKING bucket = the ordered label map INTERSECTED with the catalog's
+    # single source of truth (result_inspection.BLOCK_RULES), each gated by the
+    # run's per-rule config. Ordered-map iteration keeps output deterministic;
+    # BLOCK_RULES membership keeps it honest across merge order (e.g. once the
+    # IP-literal rule lands in BLOCK_RULES, it appears here with no further edit).
+    _labels = dict(_DET_TIERS)
+    for rule_id in (rid for rid, _ in _DET_TIERS if rid in BLOCK_RULES):
         if cfg.category_enabled(rule_id):
-            active.append(f"  - {label} ({rule_id})")
+            active.append(f"  - {_labels[rule_id]} ({rule_id})")
+    # Defensive: a blocking rule the label map does not know about must still be
+    # rendered (by id) rather than silently omitted — never under-report posture.
+    for rule_id in sorted(BLOCK_RULES - set(_labels)):
+        if cfg.category_enabled(rule_id):
+            active.append(f"  - deterministic block ({rule_id})")
     if cfg.category_enabled("WRD-RES-INJECT-PHRASE"):
         # Opt-in only (--block-inject-phrase); when on it is a real BLOCK tier.
         active.append("  - injection-phrase block (WRD-RES-INJECT-PHRASE, opt-in)")
