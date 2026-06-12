@@ -17,6 +17,7 @@ from rich.table import Table
 from . import res_rules
 from .emit_res import build_result_sarif, result_findings_to_jsonl, result_sarif_to_json
 from .guard import run_guard
+from .guard_banner import render_posture_banner
 from .guard_lifecycle import (
     GUARD_PLATFORM_REFUSE_EXIT,
     is_degraded_platform,
@@ -124,6 +125,10 @@ def register(app: typer.Typer, console: Console, err_console: Console) -> None:
         record: Optional[Path] = typer.Option(None, "--record", help="Record observed frames for later inspect"),
         max_frame_bytes: int = typer.Option(8 * 1024 * 1024, "--max-frame-bytes", help="Per-frame memory cap"),
         max_inflight: int = typer.Option(1024, "--max-inflight", help="Request-correlation map bound"),
+        quiet: bool = typer.Option(
+            False, "--quiet/--no-quiet", "--no-banner",
+            help="Suppress the startup posture banner (clean stderr for tooling integrations)",
+        ),
         allow_degraded_platform: bool = typer.Option(
             False,
             "--allow-degraded-platform",
@@ -219,6 +224,10 @@ def register(app: typer.Typer, console: Console, err_console: Console) -> None:
 
         def _record(direction: str, frame: dict) -> None:
             record_lines.append(json.dumps({"direction": direction, "frame": frame}, ensure_ascii=False))
+
+        # Startup posture banner (§4): last stderr before the child's first frame; from resolved `cfg`, names NO server.
+        if not quiet:
+            err_console.print(render_posture_banner(cfg), highlight=False)
 
         code = run_guard(
             command,
