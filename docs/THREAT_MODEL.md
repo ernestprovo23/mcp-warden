@@ -151,6 +151,130 @@ This table is the contract. It is deliberately conservative. Each "does not" row
 
 ---
 
+## 5.3 Self-threat / tool-integrity bypasses (physician, heal thyself)
+
+A v1.0 tool that claims supply-chain integrity must document **its own** residual
+bypasses, not just the threats it gates for downstream consumers. The three surfaces
+below were named in the v1 adversarial review. Each was verified against the actual
+implementation before a verdict was assigned — this section asserts **no defense that
+the code does not actually provide.** Verdicts use the same vocabulary as §5:
+**DEFENDED** (a mechanism prevents it), **PARTIALLY-DEFENDED** (a mechanism narrows it
+but a residual remains), **ACCEPTED LIMITATION** (no mechanism; documented boundary).
+
+| ID | Self-threat | Verdict | Mechanism / residual |
+|----|-------------|---------|----------------------|
+| **T-SELF-REPLAY** | A validly-signed `warden.lock` is presented for server **B** when it was pinned + signed for server **A** | **PARTIALLY-DEFENDED** | See §5.3.1 |
+| **T-SELF-SARIF** | An attacker suppresses or rewrites the SARIF report so a real drift finding is ignored by a consumer | **DEFENDED** (exit code is the gate; SARIF is advisory) | See §5.3.2 |
+| **T-SELF-JCS** | Two semantically-different surfaces canonicalize to the same bytes, or canonicalization is made non-deterministic | **PARTIALLY-DEFENDED** (collision DEFENDED; semantic-equivalence is an ACCEPTED LIMITATION = T-SEMANTIC) | See §5.3.3 |
+
+### 5.3.1 T-SELF-REPLAY — signed-lock replay against a different server
+
+**Verdict: PARTIALLY-DEFENDED.**
+
+What actually binds the lock to a server. The lock's server identity
+(`models.py:ServerIdentity`, SPEC §6) is **only** the launch invocation: `command`,
+`args`, and `command_digest = hash({command, args})`. There is **no capture of the
+server's self-declared `serverInfo.name` / `serverInfo.version`** from the `initialize`
+response anywhere in `src/` — verified by absence. The Sigstore signature
+(`signing.py`) binds a single statement `{"_type":"mcp-warden-lock-digest/v1","digest":
+<overall_digest>}`, and `overall_digest` (`lockfile.py:compute_overall_digest`) embeds
+`server.command_digest` plus the sorted per-entry digests. The signed statement carries
+**no repository, filename, or path binding** (`SIGNING.md` "No repository/filename
+binding"), so two CI runs signing the same `overall_digest` produce **interchangeable**
+bundles.
+
+What this defends. A replay against a server with a *different launch command or a
+different declared surface* fails: its recomputed `command_digest` (or its per-entry
+digests) differ, so its `overall_digest` differs, so the signed statement does not match
+and `check --verify` fails closed. Run isolation comes from the verify-time identity
+policy (`--certificate-identity` / `--certificate-oidc-issuer`), which pins *who* signed
+the digest.
+
+Residual risk (why only PARTIAL). Because identity is the launch invocation and the
+declared surface — **not** the server's network/process identity — two servers that are
+launched with a **byte-identical `command`+`args`** *and* expose a **byte-identical
+declared surface** produce the **same `overall_digest`**, and a bundle signed for one
+verifies for the other. Concretely: a lock signed for `python ./server.py` is valid for
+**any** `python ./server.py` whose surface matches, regardless of which directory,
+container, or host it runs in (the spec deliberately does not hash binary contents —
+SPEC §6.1). An operator who relies on the signature alone to prove "this is *the* server
+I approved" is over-trusting it; the signature proves "this *launch + surface* was
+approved by this identity," nothing more.
+
+Mitigations available to the operator: (1) make `command`/`args` carry the disambiguating
+identity (a pinned absolute path, a content-addressed image ref) so the launch invocation
+*is* the server identity; (2) enforce per-repo/workflow isolation through the verify-time
+`--certificate-identity` policy. This is the same residual as T-FINGERPRINT's cousin: the
+lock attests a *declared surface under a launch*, not a *running process*.
+
+### 5.3.2 T-SELF-SARIF — SARIF-output suppression / manipulation
+
+**Verdict: DEFENDED — because the exit code, not the SARIF, is the gate.**
+
+Source of truth. On the `check` path (`cli.py:check`), the verdict is the **drift set**
+returned by the shared `run_check_full` core (`check_core.py`). The SARIF file, when
+`--sarif PATH` is given, is written as a pure **side effect** (`cli.py:177`) and is read
+back by **nothing** in the verdict path. The exit code is then set **solely** by whether
+the drift set is non-empty: `if drift: raise typer.Exit(code=1)` (`cli.py:184-185`). A
+clean run exits 0; any drift exits 1; a capture/lock error exits 2. SARIF emission cannot
+change any of these.
+
+Why suppression does not bypass the gate. An attacker who deletes, truncates, or rewrites
+the SARIF file changes **only** an advisory report consumed by code-scanning dashboards —
+it does **not** change the process exit code that CI gates on. A CI job that does
+`mcp-warden check ... && deploy` (or that treats a non-zero exit as a hard failure) is
+**unaffected** by SARIF tampering, because drift already forced exit 1 before any
+dashboard saw the report.
+
+Failure mode if a consumer relies on SARIF alone. The defense holds **only** for
+pipelines that gate on the exit code. A pipeline that runs `mcp-warden check ... ; true`
+(swallowing the exit) or `... --sarif report.json` and then gates **purely** on
+GitHub code-scanning alerts derived from the SARIF has moved the trust boundary onto an
+advisory artifact. In that configuration a suppressed SARIF *can* hide a real finding.
+**This is a consumer misconfiguration, not a tool bypass** — but it is the one way to
+turn T-SELF-SARIF into a real exposure, so it is documented here and the rule for
+downstream docs is explicit: **the exit code is the authoritative gate; SARIF is advisory
+output only.** Never gate solely on the SARIF.
+
+### 5.3.3 T-SELF-JCS — canonicalization attack surface
+
+**Verdict: PARTIALLY-DEFENDED.** Engineered byte-collision is DEFENDED;
+semantic-but-byte-identical change is an ACCEPTED LIMITATION (this is exactly
+**T-SEMANTIC**, §5.2).
+
+What JCS guarantees here. Canonicalization is delegated to the vetted `rfc8785` library
+(`hashing.py:canon`), RFC 8785 JCS: object keys sorted by Unicode code point, fixed string
+escaping, fixed number formatting, all insignificant whitespace eliminated. Hashing is
+SHA-256 over those canonical bytes. The entire declared surface flows through this one
+function, so:
+
+- **Determinism is DEFENDED.** For a given JSON value, JCS produces one and only one byte
+  string; two conformant implementations capturing the same surface MUST produce the same
+  `overall_digest` (SPEC §12). There is no caller-influenceable knob (locale, key order,
+  whitespace) that makes canonicalization non-deterministic — JCS exists precisely to
+  remove those. A malformed value that JCS cannot serialize raises `ValueError`
+  (`hashing.py:44-46`) and fails closed, rather than silently hashing a partial value.
+- **Engineered collision is DEFENDED to SHA-256 strength.** Producing two *different*
+  canonical byte strings that hash to the same `overall_digest` is a SHA-256 preimage/
+  collision, not a canonicalization weakness. JCS does not widen this surface.
+
+What JCS does NOT do (the accepted limitation). Hash equality is **byte equality after
+canonicalization** — it is not semantic equality. Any change that alters the canonical
+bytes *is* caught (the structural classifier in SPEC §8.3 only describes *how* it
+changed); any change that does **not** alter canonical bytes is, by construction,
+invisible. Two surfaces are "the same" to mcp-warden **iff** their JCS bytes are identical.
+A description reworded to invert its meaning *will* change bytes and *will* be caught (as a
+`description-modified`/low drift); the genuinely invisible case is a change the operator
+already considers benign-looking AND that leaves canonical bytes identical (e.g. a cosmetic
+key the skeleton drops — `description`, `title`, `examples`, `default` are extracted *out*
+of `schema_skeleton`, SPEC §7.5, though they still feed `input_schema_hash` so a raw schema
+text change is still caught at the blob level). mcp-warden deliberately does **not** add
+fuzzy/NLP description analysis to close this (§6, cut #1): it is a net-negative,
+high-false-positive signal. This residual is tracked as **T-SEMANTIC** and is an
+**ACCEPTED LIMITATION**, not a defect.
+
+---
+
 ## 6. Deliberate cuts (what we will NOT build, by design)
 
 The council was unanimous that these *weaken* the product. They are out of scope not
@@ -191,3 +315,7 @@ because of time, but because they are net-negative:
 - `GUARD_PROXY.md` — **v0.2/v0.3:** the `guard` proxy + `inspect` analyzer contract.
 - `GUARD_PROXY_V3.md` — **v0.3:** proxy hardening (cancellation/progress passthrough, subprocess
   lifecycle, Windows) + the full v0.3 block-flag scheme.
+- `SIGNING.md` — Sigstore keyless signing/verify contract; the basis for the
+  T-SELF-REPLAY analysis (§5.3.1): what `overall_digest` binds and what it does not.
+- `SPEC.md` — MCP Lock Format v1 + the compatibility & versioning policy; the basis for
+  the T-SELF-JCS canonicalization analysis (§5.3.3) and the digest-binding facts (§5.3.1).
