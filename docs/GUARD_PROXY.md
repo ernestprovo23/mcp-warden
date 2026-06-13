@@ -36,10 +36,8 @@ client (agent / host)  <== stdio ==>  mcp-warden guard  <== stdio ==>  server (c
 ```
 
 - The client launches **`mcp-warden guard <server-cmd...>`** exactly where it would have
-  launched the server. `guard` spawns `<server-cmd...>` as its child (argv array, no shell —
-  same rule as `pin`/`check`, `WARDEN_LOCK_SCHEMA.md` §4.1).
-- `guard`'s own **stdin** carries client→server frames; its **stdout** carries
-  server→client frames. Two directions, one process.
+  launched the server. `guard` spawns `<server-cmd...>` as its child (argv array, no shell — same rule as `pin`/`check`, `WARDEN_LOCK_SCHEMA.md` §4.1).
+- `guard`'s own **stdin** carries client→server frames; its **stdout** carries server→client frames (two directions, one process).
 - `guard`'s child's **stderr** is passed through to `guard`'s stderr untouched (§4.5).
 
 ---
@@ -209,8 +207,9 @@ tool's declarations from `warden.lock` (`--lock <file>`; absent ⇒ fail-safe de
   - If it **diverges** from the lock ⇒ mid-session drift (`MCP-DRIFT` at runtime), a
     **BLOCK-tier** condition. **In v0.3 the divergent `tools/list` response is blocked by
     default** (§7) so the client never sees the rug-pulled surface; `--no-block-list-changed`
-    demotes it to shadow (log + forward). `--lock` required; absent ⇒ monitor-only note. (v0.2:
-    shadow + opt-in.)
+    demotes it to shadow (log + forward). `--lock` required; **absent ⇒ the drift gate is
+    INACTIVE** (no lock to diff against; list responses forwarded untouched, no per-frame note —
+    surfaced once at startup by the posture banner §8, not per frame). (v0.2: shadow + opt-in.)
 - This closes `T-TOCTOU-CALL` partially: a server that lists a clean surface to `pin` and
   then swaps it mid-session is caught when it announces or returns the changed list.
 
@@ -416,8 +415,8 @@ on-the-wire block.
 
 | Flag | Purpose | Default |
 |------|---------|---------|
-| `--lock <file>` | enables per-tool precision (§11 of lock schema) + the `tools/list_changed` gate | absent ⇒ fail-safe defaults, list gate = note-only |
-| `--policy <file>` | enables runtime argument policy (`POLICY_MODEL.md`) | absent ⇒ argument policy inactive |
+| `--lock <file>` | enables per-tool precision (§11 of lock schema) + the `tools/list_changed` gate | absent ⇒ fail-safe defaults; **drift gate INACTIVE** (surfaced by the startup posture banner) |
+| `--policy <file>` | enables runtime argument policy (`POLICY_MODEL.md`) | absent ⇒ argument policy inactive (surfaced by the startup posture banner) |
 | `--exfil-denylist <file>` | org "never-callback" domains, merged with the seed list | seed list only |
 | `--inject-phrases <file>` | org exact injection phrases, merged with the seed list | seed list only |
 | `--no-block-*` / `--allow-exfil-domain` / `--no-block-deterministic` (§5.2–§5.3, `GUARD_PROXY_V3.md` §4) | opt a default-blocking category (or the whole tier) back to shadow | off (blocks by default) |
@@ -428,9 +427,13 @@ on-the-wire block.
 | `--record <trace.jsonl>` | record observed frames for later `inspect` | off |
 | `--max-frame-bytes <N>` | per-frame memory cap (pass-through over cap) | 8 MiB |
 | `--max-inflight <N>` | request-correlation map bound | 1024 |
+| `--quiet` / `--no-banner` | suppress the one-shot **startup posture banner** (clean stderr for tooling integrations) | off (banner ON) |
 
 All denylist/phrase files are **literal entries** (domains / exact phrases), never regex
-(`RESULT_INSPECTION.md` §9).
+(`RESULT_INSPECTION.md` §9). **Startup posture banner:** after config resolution, before the
+child's first frame, `guard` writes a one-shot stderr banner — BLOCKING vs MONITOR-only vs
+INACTIVE for the run (e.g. drift gate / argument policy INACTIVE without `--lock` / `--policy`);
+derived entirely from the resolved config, names no server; suppress with `--quiet` / `--no-banner`.
 
 ---
 
@@ -444,9 +447,8 @@ resource-limit hit: the frame is **forwarded unmodified** (pass-through), a
 This is the deliberate asymmetry stated in `RESULT_INSPECTION.md` §5.3: **policy verdicts are
 fail-closed; inspector failures are fail-open.** The user's MCP session is never broken by a
 warden defect. In v0.3 the only frames altered/dropped are those that (a) matched a rule **and**
-(b) are in a blocking category (default-on deterministic tier unless opted out per §5.3; opt-in
-fuzzy tier). An oversized frame beyond `--max-frame-bytes` fails **open** (`GUARD_PROXY_V3.md`
-§2.4).
+(b) are in a blocking category (per §5.3). An oversized frame beyond `--max-frame-bytes` fails
+**open** (`GUARD_PROXY_V3.md` §2.4).
 
 ---
 
@@ -456,7 +458,7 @@ fuzzy tier). An oversized frame beyond `--max-frame-bytes` fails **open** (`GUAR
 `ruleId` == the `WRD-RES-*` / `POL-*` id verbatim, `level` per the severity→level mapping.
 Each finding records `direction` (`s2c`/`c2s`), the JSON-RPC `id`, the tool name, the
 content-block index (result rules), the tier, and `properties.action`
-(`blocked|shadowed|modified|passed`). All secret snippets are redacted (`CHECKS.md` rule).
+(`blocked|shadowed|modified|passed`); all secret snippets are redacted (`CHECKS.md` rule).
 
 ---
 
