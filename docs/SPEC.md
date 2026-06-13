@@ -26,11 +26,10 @@ between an approved baseline and a later observation ("drift").
 classification of any difference from a stored baseline.
 
 **Out of scope (non-goals).** This format does **not** describe, attest to, or constrain
-runtime behavior. It covers declared-surface integrity only. It is **not** a statement
+runtime behavior — it covers declared-surface integrity only. It is **not** a statement
 that a server is safe, correct, or trustworthy at execution time; it does not verify the
-*contents* of the launched binary; and it makes no claim about what a tool does when
-called. A matching digest means only that the declared surface is byte-identical to the
-baseline — nothing more.
+*contents* of the launched binary; and it makes no claim about what a tool does when called.
+A matching digest means only that the declared surface is byte-identical to the baseline.
 
 ---
 
@@ -48,7 +47,7 @@ baseline — nothing more.
 
 ```jsonc
 {
-  "schema_version": 1,             // integer; this format = 1
+  "schema_version": 3,             // integer; see §14 — the current format level
   "warden_version": "x.y.z",       // semver of the tool that wrote the file
   "server": { ... },               // §6 server identity
   "tools":     [ { ... } ],        // §7 per-entry, sorted by name
@@ -60,7 +59,10 @@ baseline — nothing more.
 }
 ```
 
-- `schema_version` MUST be the integer `1` for this format.
+- `schema_version` MUST be a positive integer naming the format level (§14). "MCP Lock
+  Format v1" is the **stable family** defined by this document; `schema_version` is the
+  in-family integer the digest commits to, which bumps on a hashed-skeleton change (§14).
+  The reference implementation currently writes `3`.
 - Every top-level key listed above is **required**.
 - Empty collections MUST be written as `[]`, never omitted. `findings` MAY be empty.
 - `overall_digest` is computed per §8; `tools`/`resources`/`prompts` are sorted per §7.
@@ -410,7 +412,7 @@ carries full 64-hex digests):
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 3,
   "warden_version": "0.3.0",
   "server": {
     "command": "node",
@@ -449,7 +451,49 @@ carries full 64-hex digests):
 ```
 
 To reproduce `overall_digest` here, a verifier hashes
-`{"schema_version":1,"server":{"command_digest":"sha256:3f1a...c0de"},"tools":["sha256:7d80...4e2b"],"resources":[],"prompts":[]}`
+`{"schema_version":3,"server":{"command_digest":"sha256:3f1a...c0de"},"tools":["sha256:7d80...4e2b"],"resources":[],"prompts":[]}`
 under §4 canonicalization and §5 hashing. If that value equals the stored
 `overall_digest`, there is no drift; otherwise the verifier diffs per entry (§8.2) and
 exits non-zero.
+
+---
+
+## 14. Compatibility & versioning policy
+
+Publishing "MCP Lock Format v1" is an implicit **stability contract**. This section makes
+it explicit: what stays stable, what may change, and what a producer MUST do when it
+changes. The governing line is the digest: a change is *compatible* iff it cannot alter a
+server's `overall_digest`.
+
+**14.1 Backward-compatible (additive, out-of-digest) changes.** A change is
+backward-compatible — no `schema_version` bump — when it touches **only** fields excluded
+from `overall_digest` (§8.1: `findings`, `pin`, `warden_version`). A producer MAY add new
+keys *inside* `pin`; readers MUST tolerate (ignore) unknown `pin` keys (§10). Precedent: the
+structured provenance block (`pin.provenance_version`, `pin.pinner`, `pin.attestations`,
+`pin.rotated_at`) and the Sigstore signer pointer attestation were all added **outside**
+`overall_digest`, carry their **own** `provenance_version` counter (distinct from
+`schema_version` by design), and leave every server's digest byte-identical — so an older
+verifier keeps verifying a newer producer's lock for an unchanged surface.
+
+**14.2 What forces a `schema_version` bump.** Anything that changes the bytes hashed into
+`overall_digest` forces a bump: the §8.1 digest skeleton (`schema_version`,
+`server.command_digest`, the per-entry digest list) and **any hashed per-entry field** —
+`description_hash`, `input_schema_hash`, `arguments_hash`, `capabilities`, the
+`schema_skeleton` extraction rules, or the `inspection` block (§11, in-digest). Real history:
+**1→2** added the structural `schema_skeleton` to tool entries; **2→3** began resolving
+in-document `$ref` leaves inside the skeleton (no longer an opaque leaf). Each changed the
+skeleton of affected tools → `entry_digest` → `overall_digest`, so each was a bump, not a
+silent surface change. A producer MUST NOT change any hashed field's derivation without
+bumping `schema_version`.
+
+**14.3 How consumers are notified / how old locks are handled.** Because `schema_version`
+lives **inside** `overall_digest`, a format bump deterministically changes the digest, and
+on an approved baseline a verifier surfaces it as the **same** high `unapproved-change`
+finding it raises for any surface change (§10) — never an auto-pass across the boundary.
+When `schema_version` increases, the verifier additionally emits an **additive low
+`schema-version-migrated` advisory** that *explains the digest delta* but MUST NOT replace,
+gate, or **downgrade** that finding (auto-downgrading would be a laundering bypass); the
+operator reviews and re-pins to re-attest under the new level. Pre-skeleton (v1) locks
+degrade gracefully: a baseline lacking a `schema_skeleton` falls back to the coarse
+`schema-modified` (high) until re-pinned (§7.5, §8.3). Additive migration advisories never
+DOWNGRADE a finding.
