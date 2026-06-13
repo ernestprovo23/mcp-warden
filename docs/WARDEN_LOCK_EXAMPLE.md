@@ -24,12 +24,12 @@ post-`lock rotate` `pin` block (same `overall_digest`, `rotation_count` bumped):
 
 ```json
 "pin": {
-  "created_at": "2026-06-06T14:22:05Z", "warden_version": "0.3.0",
+  "created_at": "2026-06-06T14:22:05Z", "warden_version": "1.0.0",
   "mcp_protocol_version": "2025-06-18", "approved": true,
   "approver": "boss@example.invalid", "approved_at": "2026-06-08T09:00:00Z",
   "approved_digest": "sha256:aa00...ff11",
   "provenance_version": 1,
-  "pinner": { "tool": "mcp-warden", "tool_version": "0.3.0", "actor": null, "environment": null },
+  "pinner": { "tool": "mcp-warden", "tool_version": "1.0.0", "actor": null, "environment": null },
   "attestations": [
     { "actor": "ci-bot@example.invalid", "role": "approver", "method": "manual",
       "created_at": "2026-06-06T14:22:06Z", "bound_digest": "sha256:aa00...ff11", "note": null },

@@ -28,26 +28,9 @@ CI. The v0.3 `guard` proxy adds deterministic runtime *result* inspection
 
 ## [Unreleased]
 
-Tracking the 0.3.0 → 1.0.0 arc. No release date is set; 1.0.0 ships when the v1
-roadmap (`sdlc/mcp-warden-v1/03_V1_ROADMAP.md`) waves land.
+_No unreleased changes yet._
 
-### Changed
-
-- **Distribution rename to `mcpwarden`.** The PyPI distribution name is now `mcpwarden`
-  because `mcp-warden` is taken on PyPI by an unrelated package. The CLI command
-  (`mcp-warden`) and repo are unchanged.
-- README repositioned around the lockfile / CI-gate category claim, with the
-  stdio-transport scope surfaced in the opening paragraph and a "Who it's for"
-  use-cases section (author-flagship first). (#45, #49)
-
-### Fixed
-
-- Removed the install hazard: every `pip install mcp-warden` snippet (README, docs
-  site, example workflows) now installs `mcpwarden`. The README carries a prominent
-  impostor-warning banner.
-- D6: exfil-domain matching against raw-IP-literal hosts (#11, in review).
-
-## [1.0.0] — Unreleased (TBD)
+## [1.0.0] — 2026-06-12
 
 First stable release. No new core features over 0.3.0 — v1 is the
 distribution-hygiene, self-credentialing, and documentation hardening of an already
@@ -78,18 +61,47 @@ v1-strong foundation. Highlights of the 0.3.0 → 1.0.0 arc:
 - **Property-based fuzzing** (Hypothesis) of the guard stdio framer, ANSI stripper,
   exfil-domain matcher, and secret redactor under `tests/fuzz/`. (#17)
 - **`--strict-frame-cap`**: fail-closed on over-cap server→client result frames. (#37)
+- **Raw-IP-literal exfil/SSRF matching (D6)**: deterministic matching of exfil-domain
+  rules against raw IPv4/IPv6 literal hosts, closing the IP-literal bypass of the
+  domain matcher. (#54)
+- **`guard` startup posture banner** reporting the active enforcement stance
+  (active / monitor / inactive, derived from the live `BLOCK_RULES`), plus a
+  fail-closed refusal (exit 2) on non-POSIX / degraded platforms unless explicitly
+  overridden. (#57)
 - Vendor-neutral **MCP Lock Format v1** spec (`docs/SPEC.md`) and an education-first
   docs site with an honest comparison page. (#46, #47, #48, #50)
+- **MCP Lock Format v1 compatibility & versioning policy** (`docs/SPEC.md §14`) plus a
+  `THREAT_MODEL.md §5.3` self-bypass section (signed-lock replay, SARIF suppression,
+  JCS canonicalization edge cases). (#56)
+- **Hash-pinned dev/CI lockfile** (`requirements-dev.lock`) and a documented
+  dependency-update policy in `SECURITY.md`, so the toolchain that builds a
+  supply-chain gate is itself pinned. (#59, closes #14)
+- **Release-on-publish GitHub workflow** with OIDC trusted publishing to PyPI and
+  self Sigstore signing of the release artifacts, plus a `RELEASING.md` runbook. (#58)
+
+### Changed
+
+- **Distribution rename to `mcpwarden`.** The PyPI distribution name is now `mcpwarden`
+  because `mcp-warden` is taken on PyPI by an unrelated package. The CLI command
+  (`mcp-warden`) and repo are unchanged. (#55)
+- README repositioned around the lockfile / CI-gate category claim, with the
+  stdio-transport scope surfaced in the opening paragraph and a "Who it's for"
+  use-cases section (author-flagship first). (#45, #49, #55)
 
 ### Fixed
 
 - `redact_secret` never discloses more than half of a detected secret. (#38)
+- Removed the install hazard: every `pip install mcp-warden` snippet (README, docs
+  site, example workflows) now installs `mcpwarden`. The README carries a prominent
+  impostor-warning banner. (#55)
+- Corrected the `SPEC.md` worked-example `schema_version` from `1` to `3` to match the
+  live `SCHEMA_VERSION`. (#56)
 
 ### Security
 
 - The release pipeline signs its own artifacts (Sigstore / attestation) and publishes a
   pinned-hash lockfile for the install path — the "heal thyself" requirement for a
-  supply-chain tool.
+  supply-chain tool. (#58, #59)
 
 ## [0.3.0] — 2026 (in-tree baseline, not released to PyPI)
 
@@ -108,4 +120,5 @@ v1-strong foundation. Highlights of the 0.3.0 → 1.0.0 arc:
   declared surface, RFC 8785 (JCS) + SHA-256 canonicalization, SARIF output, and a live
   integrity-gate workflow with committed `clean.warden.lock`.
 
-[Unreleased]: https://github.com/ernestprovo23/mcp-warden/compare/main...HEAD
+[Unreleased]: https://github.com/ernestprovo23/mcp-warden/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/ernestprovo23/mcp-warden/releases/tag/v1.0.0
