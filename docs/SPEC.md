@@ -413,7 +413,7 @@ carries full 64-hex digests):
 ```json
 {
   "schema_version": 3,
-  "warden_version": "0.3.0",
+  "warden_version": "1.0.0",
   "server": {
     "command": "node",
     "args": ["./server.js"],
@@ -440,7 +440,7 @@ carries full 64-hex digests):
   "overall_digest": "sha256:a91c...f300",
   "pin": {
     "created_at": "2026-06-06T14:22:05Z",
-    "warden_version": "0.3.0",
+    "warden_version": "1.0.0",
     "mcp_protocol_version": "2025-06-18",
     "approved": true,
     "approver": "ci-bot",
