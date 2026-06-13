@@ -62,6 +62,31 @@ If you would rather seed the project manually first:
 > Prefer the pending-publisher path. It avoids ever minting a long-lived token and
 > keeps the entire supply chain OIDC-only from release #1.
 
+### Enable OIDC publishing (the `PYPI_TRUSTED_PUBLISHER` gate)
+
+The `pypi-publish` job in `release.yml` is gated behind the repo variable
+`PYPI_TRUSTED_PUBLISHER` and only runs when it equals `true`. This lets you publish
+a GitHub Release that **builds + Sigstore-signs + attaches `.sigstore` bundles**
+without the publish job failing red before the Trusted Publisher exists.
+
+- **While the variable is unset** (or any value other than `true`): publishing a
+  GitHub Release builds the sdist + wheel, Sigstore-signs them, and attaches the
+  bundles to the Release — but the `pypi-publish` job is **SKIPPED** (gray, not red)
+  and nothing is uploaded to PyPI. Use this to cut signed GitHub Releases for
+  versions already published by token (e.g. `1.0.0`, `1.0.1`).
+- **After you have configured the Trusted Publisher above** (project
+  `mcp-warden-cli`, owner `ernestprovo23`, repo `mcp-warden`, workflow
+  `release.yml`), enable OIDC publishing for future releases by setting the
+  variable:
+  ```bash
+  gh variable set PYPI_TRUSTED_PUBLISHER --body true
+  ```
+  or in the GitHub UI: **Settings → Secrets and variables → Actions → Variables →
+  New repository variable**, name `PYPI_TRUSTED_PUBLISHER`, value `true`.
+
+Re-running a Release for an already-published version is also safe: the publish step
+uses `skip-existing: true`, so a duplicate version no-ops instead of failing.
+
 ### (Optional) TestPyPI dry-run publisher
 
 The workflow has a manual `workflow_dispatch` path that publishes to TestPyPI for a
@@ -107,9 +132,12 @@ Do this on a clean checkout of `main` with all v1 PRs merged.
 
    Publishing the Release fires `release.yml`, which:
    - **build** — builds the sdist + wheel and uploads them as workflow artifacts;
-   - **pypi-publish** — publishes those artifacts to PyPI via OIDC (no token);
+   - **pypi-publish** — publishes those artifacts to PyPI via OIDC (no token).
+     **Skipped unless** the repo variable `PYPI_TRUSTED_PUBLISHER` is `true`
+     (see "Enable OIDC publishing" in section 0). For versions already published
+     by token (`1.0.0`, `1.0.1`) leave it unset so this job skips cleanly;
    - **sign** — signs the sdist + wheel with Sigstore keyless and attaches the
-     `.sigstore` bundle(s) to the Release assets.
+     `.sigstore` bundle(s) to the Release assets (runs regardless of the gate).
 
 ---
 

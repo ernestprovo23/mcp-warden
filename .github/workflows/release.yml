@@ -16,8 +16,12 @@
 # What it does WHEN a Release is published:
 #   build         — builds sdist + wheel, uploads them as workflow artifacts.
 #   pypi-publish  — publishes those artifacts to PyPI via OIDC Trusted Publishing
-#                   (NO API token, NO stored secret). On a manual workflow_dispatch
-#                   with publish-target=testpypi it targets TestPyPI instead.
+#                   (NO API token, NO stored secret). GATED on the repo variable
+#                   PYPI_TRUSTED_PUBLISHER == 'true': until that is set, this job
+#                   is SKIPPED cleanly (gray) so a Release still builds + signs +
+#                   attaches bundles without a red publish failure. On a manual
+#                   workflow_dispatch with publish-target=testpypi it targets
+#                   TestPyPI instead.
 #   sign          — signs the sdist + wheel with Sigstore keyless (ambient OIDC ->
 #                   Fulcio, same trust model as sigstore-fixture.yml / integrity-gate.yml)
 #                   and attaches the .sigstore bundles to the GitHub Release assets.
@@ -113,10 +117,18 @@ jobs:
     permissions:
       id-token: write   # REQUIRED for OIDC Trusted Publishing — mints the token
       contents: read
-    # Skip entirely on a manual run that opted out of publishing.
+    # Gate: only run when OIDC Trusted Publishing is explicitly enabled via the
+    # repo variable PYPI_TRUSTED_PUBLISHER == 'true'. While the variable is unset
+    # (or any value other than 'true'), this job is SKIPPED cleanly (gray, not red)
+    # so a published Release still builds + Sigstore-signs + attaches bundles
+    # without a red "publish" failure. Set it once the Trusted Publisher exists:
+    #   gh variable set PYPI_TRUSTED_PUBLISHER --body true   (see RELEASING.md).
+    # The event-type guard is preserved: skip entirely on a manual run that opted
+    # out of publishing.
     if: >-
-      github.event_name == 'release' ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.publish-target != 'none')
+      vars.PYPI_TRUSTED_PUBLISHER == 'true' &&
+      (github.event_name == 'release' ||
+       (github.event_name == 'workflow_dispatch' && github.event.inputs.publish-target != 'none'))
 
     steps:
       - name: Download dist artifacts
@@ -132,6 +144,9 @@ jobs:
         with:
           packages-dir: dist/
           # No `password:` — OIDC Trusted Publishing is used (no stored secret).
+          # Re-running a Release for an already-published version no-ops on the
+          # duplicate instead of failing red (e.g. token-published 1.0.0 / 1.0.1).
+          skip-existing: true
 
       # TestPyPI — only on a manual dry run. Same OIDC mechanism, different index.
       # Requires a SEPARATE Trusted Publisher on test.pypi.org (optional; see RELEASING.md).
@@ -141,6 +156,8 @@ jobs:
         with:
           packages-dir: dist/
           repository-url: https://test.pypi.org/legacy/
+          # Re-running a dry run no-ops on an already-uploaded TestPyPI version.
+          skip-existing: true
 
   # --------------------------------------------------------------------------
   # Job 3: sign the release artifacts with Sigstore keyless ("heal thyself", W2.3).
